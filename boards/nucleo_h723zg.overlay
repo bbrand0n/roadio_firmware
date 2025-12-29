@@ -1,0 +1,191 @@
+/*
+ * Devicetree overlay for Nucleo-H723ZG board
+ * Roadio hardware configuration
+ *
+ * Hardware components:
+ * - SN65HVD230 CAN transceiver (connected to FDCAN1)
+ * - W25Q128 external SPI flash (128 Mbit / 16 MB)
+ * - LM2596 DC-DC buck converter (external power management)
+ *
+ * IMPORTANT: Verify actual pin connections match your hardware wiring!
+ * Update pin assignments below to match your specific setup.
+ */
+
+/ {
+	aliases {
+		/* Define aliases for easy reference in application code */
+		canbus0 = &fdcan1;
+		spi-flash0 = &w25q128;
+	};
+
+	/* Choose CAN as the default console (optional - can use UART instead) */
+	chosen {
+		zephyr,canbus = &fdcan1;
+	};
+};
+
+/*
+ * FDCAN1 Configuration
+ *
+ * Default pins (verify against your actual wiring):
+ * - TX: PD1 (Arduino D54)
+ * - RX: PD0 (Arduino D55)
+ *
+ * SN65HVD230 transceiver connections:
+ *   STM32 TX (PD1) -> CAN TX (pin 1)
+ *   STM32 RX (PD0) -> CAN RX (pin 4)
+ *   CAN H/L -> to vehicle OBD-II via DB9 adapter
+ *
+ * NOTE: OBD-II CAN is typically on pins 6 (CAN-H) and 14 (CAN-L) of the OBD connector.
+ * Verify your DB9<->OBD2 cable pinout!
+ */
+&fdcan1 {
+	status = "okay";
+	pinctrl-0 = <&fdcan1_rx_pd0 &fdcan1_tx_pd1>;
+	pinctrl-names = "default";
+
+	/*
+	 * CAN bus timing configuration:
+	 * - bitrate: 500 kbit/s (standard OBD-II speed)
+	 * - sample-point: 87.5% (recommended for automotive CAN)
+	 * Adjust if your vehicle uses different speed (125k, 250k, 500k, 1000k common)
+	 * If not specified, defaults to CONFIG_CAN_DEFAULT_BITRATE (usually 125k or 500k)
+	 */
+	bitrate = <500000>;
+	sample-point = <875>;
+
+	can-transceiver {
+		max-bitrate = <5000000>; /* SN65HVD230 supports up to 1 Mbps for CAN, 5Mbps for CAN-FD */
+	};
+};
+
+/*
+ * SPI1 Configuration for W25Q128 External Flash
+ *
+ * Default pins (verify against your actual wiring):
+ * - SCK:  PA5  (Arduino D13, Morpho CN7-10)
+ * - MISO: PA6  (Arduino D12, Morpho CN7-12)
+ * - MOSI: PB5  (Arduino D4, Morpho CN7-29)
+ * - CS:   PD14 (Morpho CN7-16) - adjust as needed
+ *
+ * Note: Board default uses PB5 for MOSI. If using Arduino connector,
+ * you may want PA7 instead - change pinctrl-0 accordingly.
+ *
+ * W25Q128 module connections:
+ *   VCC  -> 3.3V
+ *   GND  -> GND
+ *   DI   -> MOSI (PB5)
+ *   DO   -> MISO (PA6)
+ *   CLK  -> SCK  (PA5)
+ *   CS   -> PD14 (or your chosen CS pin)
+ */
+&spi1 {
+	status = "okay";
+	pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pb5>;
+	pinctrl-names = "default";
+	cs-gpios = <&gpiod 14 GPIO_ACTIVE_LOW>;  /* CS on PD14 - adjust to match your wiring */
+
+	w25q128: w25q128jv@0 {
+		compatible = "jedec,spi-nor";
+		reg = <0>;
+		spi-max-frequency = <80000000>;  /* W25Q128JV supports up to 133 MHz, start conservative */
+		size = <0x1000000>;  /* 128 Mbit = 16 MB = 0x1000000 bytes */
+		jedec-id = [ef 40 18];  /* Winbond W25Q128 JEDEC ID */
+		has-dpd;  /* Deep Power-Down support */
+		status = "disabled";  /* Enable after wiring up hardware */
+
+		/*
+		 * Flash partitions for storage
+		 * Adjust based on your firmware/data storage needs
+		 */
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			/*
+			 * Storage partition for application data
+			 * Using LittleFS or NVS (Non-Volatile Storage)
+			 * Size: 16 MB (entire flash for now)
+			 */
+			storage_partition: partition@0 {
+				label = "storage";
+				reg = <0x00000000 0x01000000>;  /* 16 MB */
+			};
+		};
+	};
+};
+
+/*
+ * Optional: Configure USART3 for debug console (if not using CAN)
+ * Default Nucleo serial is on USART3 via ST-Link USB
+ *
+ * Uncomment if you want UART debug output:
+ */
+/*
+&usart3 {
+	status = "okay";
+	pinctrl-0 = <&usart3_tx_pd8 &usart3_rx_pd9>;
+	pinctrl-names = "default";
+	current-speed = <115200>;
+};
+*/
+
+/*
+ * Enable GPIO ports used by peripherals
+ */
+&gpioa {
+	status = "okay";
+};
+
+&gpiob {
+	status = "okay";
+};
+
+&gpiod {
+	status = "okay";
+};
+
+/*
+ * Optional: QSPI configuration for W25Q128
+ *
+ * If you want to use QSPI instead of SPI for faster flash access,
+ * uncomment and configure this section. Requires different wiring:
+ *
+ * QSPI pins on STM32H723:
+ *   CLK:  PB2
+ *   NCS:  PB6
+ *   IO0:  PD11
+ *   IO1:  PD12
+ *   IO2:  PE2
+ *   IO3:  PD13
+ */
+/*
+&quadspi {
+	status = "okay";
+	pinctrl-0 = <&quadspi_clk_pb2 &quadspi_bk1_ncs_pb6
+	             &quadspi_bk1_io0_pd11 &quadspi_bk1_io1_pd12
+	             &quadspi_bk1_io2_pe2 &quadspi_bk1_io3_pd13>;
+	pinctrl-names = "default";
+
+	w25q128: w25q128jv@0 {
+		compatible = "st,stm32-qspi-nor";
+		reg = <0>;
+		qspi-max-frequency = <80000000>;
+		size = <0x1000000>;
+		jedec-id = [ef 40 18];
+		status = "okay";
+
+		partitions {
+			compatible = "fixed-partitions";
+			#address-cells = <1>;
+			#size-cells = <1>;
+
+			storage_partition: partition@0 {
+				label = "storage";
+				reg = <0x00000000 0x01000000>;
+			};
+		};
+	};
+};
+*/

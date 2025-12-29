@@ -1,0 +1,9 @@
+# Ignore build artifacts and temporary files
+
+.venv/
+.west/
+bootloader/
+build/
+modules/
+tools/
+zephyr/
